@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Botica Santillán</title>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/quagga/0.12.1/quagga.min.js"></script>
+<script src="https://unpkg.com/@zxing/library@0.19.1/umd/index.min.js"></script>
 <style>
 @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600;700&family=DM+Mono:wght@400;500&display=swap');
 *{box-sizing:border-box;margin:0;padding:0}
@@ -208,13 +208,54 @@ tbody tr:last-child{border-bottom:none}
 </head>
 <body>
 
+<!-- ===== LOGIN ===== -->
+<div id="login-screen" style="
+  position:fixed;inset:0;z-index:9999;
+  background:linear-gradient(135deg,#0a4428 0%,#0d5c35 50%,#138a4f 100%);
+  display:flex;align-items:center;justify-content:center;
+  font-family:'DM Sans',sans-serif;
+">
+  <div style="background:#fff;border-radius:20px;padding:40px 36px;width:100%;max-width:380px;box-shadow:0 20px 60px rgba(0,0,0,.3);text-align:center">
+    <div style="width:72px;height:72px;background:linear-gradient(135deg,#0d5c35,#138a4f);border-radius:18px;display:flex;align-items:center;justify-content:center;font-size:36px;margin:0 auto 20px">💊</div>
+    <h1 style="font-size:22px;font-weight:800;color:#0d5c35;margin-bottom:4px">Botica Santillán</h1>
+    <p style="font-size:13px;color:#6b7280;margin-bottom:28px">Sistema de Gestión Farmacéutica</p>
+    <div style="text-align:left;margin-bottom:14px">
+      <label style="font-size:12px;font-weight:700;color:#6b7280;text-transform:uppercase;letter-spacing:.4px;display:block;margin-bottom:6px">Contraseña</label>
+      <div style="position:relative">
+        <input id="login-pass" type="password" placeholder="Ingresa tu contraseña..."
+          style="width:100%;padding:13px 44px 13px 14px;border:2px solid #d1e8da;border-radius:10px;font-size:15px;font-family:'DM Sans',sans-serif;outline:none;box-sizing:border-box;transition:border .2s"
+          onkeydown="if(event.key==='Enter') doLogin()"
+          onfocus="this.style.borderColor='#138a4f'"
+          onblur="this.style.borderColor='#d1e8da'">
+        <span onclick="togglePass()" style="position:absolute;right:13px;top:50%;transform:translateY(-50%);cursor:pointer;font-size:18px;user-select:none" id="eye-icon">👁</span>
+      </div>
+    </div>
+    <div id="login-error" style="display:none;background:#fde8e8;border:1px solid #fca5a5;border-radius:8px;padding:10px 14px;font-size:13px;color:#991b1b;font-weight:600;margin-bottom:14px">
+      ❌ Contraseña incorrecta. Inténtalo de nuevo.
+    </div>
+    <button onclick="doLogin()" style="
+      width:100%;padding:14px;background:linear-gradient(135deg,#0d5c35,#138a4f);
+      color:#fff;border:none;border-radius:10px;font-size:15px;font-weight:700;
+      cursor:pointer;font-family:'DM Sans',sans-serif;transition:opacity .2s;
+      box-shadow:0 4px 16px rgba(13,92,53,.3)
+    " onmouseover="this.style.opacity='.9'" onmouseout="this.style.opacity='1'">
+      🔐 Ingresar
+    </button>
+    <p style="font-size:11px;color:#9ca3af;margin-top:20px">Acceso exclusivo para personal autorizado</p>
+  </div>
+</div>
+
+<div id="app-content" style="display:none">
 <header>
   <div class="logo-wrap">💊</div>
   <div class="hi">
     <h1>Botica Santillán</h1>
     <p>Sistema de Gestión Farmacéutica</p>
   </div>
-  <div class="dt" id="dt"></div>
+  <div style="display:flex;align-items:center;gap:12px">
+    <div class="dt" id="dt"></div>
+    <button onclick="doLogout()" style="background:rgba(255,255,255,.15);border:1px solid rgba(255,255,255,.3);color:#fff;padding:7px 13px;border-radius:8px;cursor:pointer;font-size:12px;font-weight:600;font-family:'DM Sans',sans-serif" title="Cerrar sesión">🔒 Salir</button>
+  </div>
 </header>
 
 <nav>
@@ -602,6 +643,7 @@ function SS(id, btn) {
   btn.classList.add('active');
   if(id === 'inventario') RI();
   if(id === 'reportes') RR();
+  
   if(id !== 'scan') stopCamera();
   if(id === 'scan') setTimeout(() => document.getElementById('barcode-input')?.focus(), 200);
 }
@@ -990,76 +1032,64 @@ function cancelAIResult() { document.getElementById('ai-result').classList.remov
 // ===================== SCANNER - 4 OPCIONES =====================
 let celularPolling = null;
 let celularSessionId = null;
+let zxingReader = null;
 
-// Opción 1: Cámara del dispositivo actual
+// Opción 1: Cámara con ZXing (funciona en celular y PC)
 async function toggleCamera() {
-  if(quaggaRunning) { stopCamera(); return; }
   const wrap = document.getElementById('camera-wrap');
   const btn = document.getElementById('btn-cam');
+  if(zxingReader) { stopCamera(); return; }
+  wrap.style.display = 'block';
+  btn.classList.add('active');
+  btn.innerHTML = '🛑 Detener Cámara';
   try {
-    wrap.style.display = 'block';
-    btn.classList.add('active');
-    btn.innerHTML = '🛑 Detener Cámara';
-    if(typeof Quagga !== 'undefined') {
-      Quagga.init({
-        inputStream: {
-          name: "Live", type: "LiveStream",
-          target: wrap,
-          constraints: { facingMode: "environment", width: 640, height: 480 }
-        },
-        decoder: { readers: ["ean_reader","ean_8_reader","code_128_reader","code_39_reader","upc_reader","upc_e_reader"] },
-        locate: true
-      }, function(err) {
-        if(err) { fallbackCamera(); return; }
-        Quagga.start();
-        quaggaRunning = true;
-        let lastCode = '';
-        Quagga.onDetected(function(result) {
-          const code = result.codeResult.code;
-          if(code && code.length >= 8 && code !== lastCode) {
-            lastCode = code;
-            stopCamera();
-            document.getElementById('barcode-input').value = code;
-            notif('📦 Código detectado: ' + code, 'info');
-            lookupBarcode(code);
-          }
-        });
-      });
-    } else { fallbackCamera(); }
-  } catch(e) {
-    notif('No se pudo acceder a la cámara', 'error');
-    wrap.style.display = 'none';
-    btn.classList.remove('active');
-    btn.innerHTML = '📸 Cámara PC/Tablet';
-  }
-}
-
-async function fallbackCamera() {
-  try {
-    const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode:'environment', width:640, height:480 } });
+    if(typeof ZXing === 'undefined') {
+      notif('Cargando escáner...', 'info');
+      await new Promise(r => setTimeout(r, 2000));
+    }
+    const hints = new Map();
+    hints.set(ZXing.DecodeHintType.POSSIBLE_FORMATS, [
+      ZXing.BarcodeFormat.EAN_13, ZXing.BarcodeFormat.EAN_8,
+      ZXing.BarcodeFormat.CODE_128, ZXing.BarcodeFormat.CODE_39,
+      ZXing.BarcodeFormat.UPC_A, ZXing.BarcodeFormat.UPC_E,
+    ]);
+    hints.set(ZXing.DecodeHintType.TRY_HARDER, true);
+    zxingReader = new ZXing.BrowserMultiFormatReader(hints);
+    const devices = await ZXing.BrowserCodeReader.listVideoInputDevices();
+    let deviceId = undefined;
+    if(devices.length > 1) {
+      const back = devices.find(d => /back|rear|trasera|environment/i.test(d.label));
+      deviceId = back ? back.deviceId : devices[devices.length-1].deviceId;
+    }
     const video = document.getElementById('cam-video');
-    video.srcObject = stream;
-    cameraStream = stream;
-    quaggaRunning = true;
-    notif('Cámara activa. Ingresa el código manualmente si no detecta automático.', 'info');
+    await zxingReader.decodeFromVideoDevice(deviceId, video, (result, err) => {
+      if(result) {
+        const code = result.getText();
+        if(code && code.length >= 6) {
+          stopCamera();
+          document.getElementById('barcode-input').value = code;
+          notif('📦 Código detectado: ' + code, 'info');
+          lookupBarcode(code);
+        }
+      }
+    });
+    notif('📸 Cámara activa — apunta al código de barras', 'info');
   } catch(e) {
-    notif('No se pudo acceder a la cámara. Intenta con el lector USB.', 'error');
+    notif('No se pudo acceder a la cámara. Verifica los permisos en tu navegador.', 'error');
     stopCamera();
   }
 }
 
 function stopCamera() {
-  if(typeof Quagga !== 'undefined' && quaggaRunning) { try { Quagga.stop(); } catch(e) {} }
-  if(cameraStream) { cameraStream.getTracks().forEach(t => t.stop()); cameraStream = null; }
+  if(zxingReader) { try { zxingReader.reset(); } catch(e) {} zxingReader = null; }
   const video = document.getElementById('cam-video');
-  if(video) video.srcObject = null;
+  if(video && video.srcObject) { video.srcObject.getTracks().forEach(t => t.stop()); video.srcObject = null; }
   document.getElementById('camera-wrap').style.display = 'none';
   const btn = document.getElementById('btn-cam');
-  if(btn) { btn.classList.remove('active'); btn.innerHTML = '📸 Cámara PC/Tablet'; }
-  quaggaRunning = false;
+  if(btn) { btn.classList.remove('active'); btn.innerHTML = '📸 Cámara del dispositivo'; }
 }
 
-// Opción 2: Lector USB — enfocar el campo
+// Opción 2: Lector USB
 function focusBarcodeInput() {
   document.getElementById('barcode-input').focus();
   notif('🔫 Lector USB listo. Escanea el código en el campo de abajo.', 'info');
@@ -1085,7 +1115,7 @@ function generarQRCelular() {
   const scanURL = window.location.href.split('?')[0] + '?scan_session=' + celularSessionId + '&mode=scanner';
   document.getElementById('celular-url-text').textContent = scanURL.slice(0,45)+'...';
   document.getElementById('celular-url-link').textContent = scanURL.slice(0,50)+'...';
-  document.getElementById('celular-url-link').onclick = () => { navigator.clipboard.writeText(scanURL).then(() => notif('URL copiada', 'info')); };
+  document.getElementById('celular-url-link').onclick = () => { navigator.clipboard?.writeText(scanURL).then(() => notif('URL copiada', 'info')); };
   const canvas = document.getElementById('qr-canvas');
   const ctx = canvas.getContext('2d');
   const img = new Image();
@@ -1098,7 +1128,7 @@ function generarQRCelular() {
 
 function copiarURL() {
   const url = window.location.href.split('?')[0] + '?scan_session=' + celularSessionId + '&mode=scanner';
-  navigator.clipboard.writeText(url).then(() => notif('✅ URL copiada al portapapeles', 'info'));
+  navigator.clipboard?.writeText(url).then(() => notif('✅ URL copiada al portapapeles', 'info'));
 }
 
 function startCelularPolling() {
@@ -1121,7 +1151,7 @@ function stopCelularPolling() {
   if(celularPolling) { clearInterval(celularPolling); celularPolling = null; }
 }
 
-// Detectar modo escáner móvil
+// Modo escáner móvil
 (function() {
   const params = new URLSearchParams(window.location.search);
   const session = params.get('scan_session');
@@ -1135,11 +1165,11 @@ function stopCelularPolling() {
           <p style="opacity:.85;font-size:13px">Escáner Remoto desde Celular</p>
         </div>
         <div style="background:#fff;border-radius:14px;padding:20px;box-shadow:0 2px 12px rgba(0,0,0,.1)">
-          <p style="font-size:14px;color:#555;margin-bottom:16px">Escanea o escribe el código de barras del medicamento:</p>
-          <input id="m-barcode" type="text" inputmode="numeric" placeholder="Código de barras..." 
+          <p style="font-size:14px;color:#555;margin-bottom:16px">Ingresa el código de barras del medicamento:</p>
+          <input id="m-barcode" type="text" inputmode="numeric" placeholder="Código de barras..."
             style="width:100%;padding:14px;border:2px solid #d1e8da;border-radius:10px;font-size:20px;font-family:monospace;text-align:center;margin-bottom:14px;box-sizing:border-box;outline:none">
-          <button onclick="enviarCodigoCelular('${session}')" 
-            style="width:100%;padding:14px;background:#0d5c35;color:#fff;border:none;border-radius:10px;font-size:16px;font-weight:700;cursor:pointer;border-radius:10px">
+          <button onclick="enviarCodigoCelular('${session}')"
+            style="width:100%;padding:14px;background:#0d5c35;color:#fff;border:none;border-radius:10px;font-size:16px;font-weight:700;cursor:pointer">
             📤 Enviar al Sistema de Botica
           </button>
         </div>
@@ -1234,57 +1264,91 @@ let lastDNIResult = null;
 const APISPERU_TOKEN = 'apis-token-13668.tfKOzhnFREYvmNDG16dGAJBSY6MXNt7G';
 
 function onDNIInput() {
-  const val = document.getElementById('cr').value.trim();
+  const val = document.getElementById('cr').value.replace(/\D/g,'');
+  document.getElementById('cr').value = val;
   clearTimeout(dniTimer);
   document.getElementById('dni-found').classList.remove('show');
   document.getElementById('dni-error').classList.remove('show');
-  document.getElementById('dni-loader').classList.add('show');
   lastDNIResult = null;
   if(val.length === 8 || val.length === 11) {
-    dniTimer = setTimeout(() => lookupDNI(val, false), 400);
+    document.getElementById('dni-loader').classList.add('show');
+    dniTimer = setTimeout(() => lookupDNI(val, false), 600);
   } else {
     document.getElementById('dni-loader').classList.remove('show');
   }
 }
 
 function onDNIInputEdit() {
-  const val = document.getElementById('ev-ruc').value.trim();
+  const val = document.getElementById('ev-ruc').value.replace(/\D/g,'');
+  document.getElementById('ev-ruc').value = val;
   clearTimeout(dniTimer);
   document.getElementById('ev-dni-found').classList.remove('show');
   document.getElementById('ev-dni-error').classList.remove('show');
   if(val.length === 8 || val.length === 11) {
-    dniTimer = setTimeout(() => lookupDNI(val, true), 400);
+    dniTimer = setTimeout(() => lookupDNI(val, true), 600);
   }
 }
 
 async function lookupDNI(num, isEdit) {
   const tipo = num.length === 8 ? 'dni' : 'ruc';
   let nombre = null;
-  try {
-    // Intentar con apis.net.pe con token oficial
-    const r = await fetch(`https://api.apis.net.pe/v2/${tipo}?numero=${num}`, {
-      headers: {
-        'Accept': 'application/json',
-        'Authorization': `Bearer ${APISPERU_TOKEN}`
-      }
-    });
-    if(r.ok) {
-      const d = await r.json();
-      if(tipo === 'dni' && d.nombre) nombre = d.nombre;
-      if(tipo === 'ruc' && d.razonSocial) nombre = d.razonSocial;
-    }
-  } catch(e) {}
 
-  // Fallback: intentar sin token (versión pública)
+  // Intento 1: apis.net.pe v2 con token Bearer
   if(!nombre) {
     try {
-      const r2 = await fetch(`https://api.apis.net.pe/v1/${tipo}?numero=${num}`, {
-        headers: { 'Accept': 'application/json', 'Authorization': `Bearer ${APISPERU_TOKEN}` }
+      const r = await fetch(`https://api.apis.net.pe/v2/${tipo}?numero=${num}`, {
+        headers: { 'Authorization': `Bearer ${APISPERU_TOKEN}`, 'Accept': 'application/json' }
       });
-      if(r2.ok) {
-        const d2 = await r2.json();
-        if(tipo === 'dni' && d2.nombre) nombre = d2.nombre;
-        if(tipo === 'ruc' && d2.razonSocial) nombre = d2.razonSocial;
+      if(r.ok) {
+        const d = await r.json();
+        nombre = tipo==='dni' ? (d.nombre||d.apellidoPaterno ? `${d.apellidoPaterno||''} ${d.apellidoMaterno||''} ${d.nombres||''}`.trim() : null) : (d.razonSocial||null);
+      }
+    } catch(e) {}
+  }
+
+  // Intento 2: apis.net.pe v1
+  if(!nombre) {
+    try {
+      const r = await fetch(`https://api.apis.net.pe/v1/${tipo}?numero=${num}`, {
+        headers: { 'Authorization': `Bearer ${APISPERU_TOKEN}`, 'Accept': 'application/json' }
+      });
+      if(r.ok) {
+        const d = await r.json();
+        nombre = tipo==='dni' ? (d.nombre||null) : (d.razonSocial||null);
+      }
+    } catch(e) {}
+  }
+
+  // Intento 3: apiperu.dev (API alternativa peruana gratuita)
+  if(!nombre) {
+    try {
+      const endpoint = tipo==='dni'
+        ? `https://apiperu.dev/api/dni/${num}`
+        : `https://apiperu.dev/api/ruc/${num}`;
+      const r = await fetch(endpoint, { headers: { 'Accept': 'application/json' } });
+      if(r.ok) {
+        const d = await r.json();
+        nombre = tipo==='dni' ? (d.data?.nombre_completo||d.data?.nombre||null) : (d.data?.nombre_o_razon_social||null);
+      }
+    } catch(e) {}
+  }
+
+  // Intento 4: Claude como último recurso para RUC de empresas conocidas
+  if(!nombre && tipo==='ruc') {
+    try {
+      const r = await fetch("https://api.anthropic.com/v1/messages", {
+        method:"POST",
+        headers:{"Content-Type":"application/json"},
+        body: JSON.stringify({
+          model:"claude-haiku-4-5-20251001",
+          max_tokens:60,
+          messages:[{role:"user",content:`El RUC peruano ${num} ¿a qué empresa pertenece? Responde SOLO el nombre de la empresa o "NO_ENCONTRADO". Sin explicaciones.`}]
+        })
+      });
+      if(r.ok){
+        const d = await r.json();
+        const txt = (d.content||[]).map(i=>i.text||'').join('').trim();
+        if(txt && txt!=='NO_ENCONTRADO' && !txt.includes('NO_ENCONTRADO') && txt.length < 80) nombre = txt;
       }
     } catch(e) {}
   }
@@ -1294,10 +1358,10 @@ async function lookupDNI(num, isEdit) {
     document.getElementById('ev-dni-found').classList.remove('show');
     document.getElementById('ev-dni-error').classList.remove('show');
     if(nombre) {
+      nombre = nombre.trim();
       lastDNIResult = { nombre, num };
       document.getElementById('ev-dni-name').textContent = nombre;
       document.getElementById('ev-dni-found').classList.add('show');
-      // Auto-aplicar en edición
       document.getElementById('ev-cliente').value = nombre;
     } else {
       document.getElementById('ev-dni-error').textContent = `No se encontró el ${tipo.toUpperCase()} ${num}. Escribe el nombre manualmente.`;
@@ -1305,17 +1369,15 @@ async function lookupDNI(num, isEdit) {
     }
   } else {
     document.getElementById('dni-loader').classList.remove('show');
-    document.getElementById('dni-found').classList.remove('show');
-    document.getElementById('dni-error').classList.remove('show');
     if(nombre) {
+      nombre = nombre.trim();
       lastDNIResult = { nombre, num };
       document.getElementById('dni-name-result').textContent = nombre;
       document.getElementById('dni-found').classList.add('show');
-      // Auto-aplicar el nombre
       document.getElementById('cn').value = nombre;
-      notif(`✅ Cliente: ${nombre}`, 'info');
+      notif(`✅ ${tipo.toUpperCase()}: ${nombre}`, 'info');
     } else {
-      document.getElementById('dni-error').textContent = `No se encontró el ${tipo.toUpperCase()} ${num}. Puedes escribir el nombre manualmente.`;
+      document.getElementById('dni-error').textContent = `No se encontró el ${tipo.toUpperCase()} ${num}. Escribe el nombre manualmente.`;
       document.getElementById('dni-error').classList.add('show');
     }
   }
@@ -1573,6 +1635,55 @@ function RB(id,data){const mx=Math.max(...data.map(d=>d.v),1);document.getElemen
 // ===================== INIT =====================
 RI(); RH();
 document.querySelectorAll('.mo').forEach(o=>o.addEventListener('click',function(e){if(e.target===this)this.classList.remove('open');}));
+</script>
+
+</div> <!-- /app-content -->
+
+<script>
+// ===== LOGIN =====
+const PASS = 'bsanti2026';
+
+function doLogin() {
+  const val = document.getElementById('login-pass').value;
+  const err = document.getElementById('login-error');
+  if(val === PASS) {
+    sessionStorage.setItem('bs_auth', '1');
+    document.getElementById('login-screen').style.display = 'none';
+    document.getElementById('app-content').style.display = 'block';
+    err.style.display = 'none';
+    document.getElementById('login-pass').value = '';
+  } else {
+    err.style.display = 'block';
+    document.getElementById('login-pass').value = '';
+    document.getElementById('login-pass').focus();
+    document.getElementById('login-pass').style.borderColor = '#fca5a5';
+    setTimeout(() => document.getElementById('login-pass').style.borderColor = '#d1e8da', 2000);
+  }
+}
+
+function doLogout() {
+  if(confirm('¿Cerrar sesión?')) {
+    sessionStorage.removeItem('bs_auth');
+    document.getElementById('app-content').style.display = 'none';
+    document.getElementById('login-screen').style.display = 'flex';
+    setTimeout(() => document.getElementById('login-pass').focus(), 100);
+  }
+}
+
+function togglePass() {
+  const inp = document.getElementById('login-pass');
+  const eye = document.getElementById('eye-icon');
+  if(inp.type === 'password') { inp.type = 'text'; eye.textContent = '🙈'; }
+  else { inp.type = 'password'; eye.textContent = '👁'; }
+}
+
+// Verificar si ya está autenticado en esta sesión
+if(sessionStorage.getItem('bs_auth') === '1') {
+  document.getElementById('login-screen').style.display = 'none';
+  document.getElementById('app-content').style.display = 'block';
+} else {
+  setTimeout(() => document.getElementById('login-pass').focus(), 300);
+}
 </script>
 </body>
 </html>
